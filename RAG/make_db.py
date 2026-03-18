@@ -1,33 +1,37 @@
-import os
+﻿import os
 import re
 import shutil
 
 from langchain_core.documents import Document
-from langchain_community.vectorstores import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+try:
+    from langchain_chroma import Chroma
+except ImportError:
+    from langchain_community.vectorstores import Chroma
 
 from dotenv import load_dotenv
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Load .env from current working tree first, then RAG/.env explicitly.
 load_dotenv()
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
-DATA_PATH   = "data"          # folder containing your .md files
-CHROMA_PATH = "chroma"        # where the Chroma DB will be persisted
+DATA_PATH = os.path.join(BASE_DIR, "data")
+CHROMA_PATH = os.path.join(BASE_DIR, "chroma")
 
 
-# ── Entry point ────────────────────────────────────────────────────────────────
-
+# -------------------- Entry point --------------------
 def main():
     generate_data_store()
 
 
 def generate_data_store():
     documents = load_documents()
-    chunks    = split_text(documents)
+    chunks = split_text(documents)
     save_to_chroma(chunks)
 
 
-# ── Load ───────────────────────────────────────────────────────────────────────
-
+# -------------------- Load --------------------
 def load_documents() -> list[Document]:
     """
     Read every .md file in DATA_PATH and return a list of LangChain Documents,
@@ -43,17 +47,18 @@ def load_documents() -> list[Document]:
         with open(filepath, "r", encoding="utf-8") as f:
             text = f.read()
 
-        documents.append(Document(
-            page_content=text,
-            metadata={"source": filepath},
-        ))
+        documents.append(
+            Document(
+                page_content=text,
+                metadata={"source": filepath},
+            )
+        )
 
     print(f"Loaded {len(documents)} document(s).")
     return documents
 
 
-# ── Split ──────────────────────────────────────────────────────────────────────
-
+# -------------------- Split --------------------
 def split_text(documents: list[Document]) -> list[Document]:
     """
     Split each document into one chunk per Q&A pair.
@@ -64,7 +69,7 @@ def split_text(documents: list[Document]) -> list[Document]:
 
         2. Next question ...
 
-    Each chunk gets metadata:  source, question_number, question
+    Each chunk gets metadata: source, question_number, question
     """
     chunks = []
 
@@ -79,35 +84,36 @@ def split_text(documents: list[Document]) -> list[Document]:
 
         for number, question, answer in matches:
             question = question.strip()
-            answer   = answer.strip()
+            answer = answer.strip()
 
             # Combine into one clean chunk
             page_content = f"Q: {question}\nA: {answer}"
 
-            chunks.append(Document(
-                page_content=page_content,
-                metadata={
-                    "source":          doc.metadata["source"],
-                    "question_number": int(number),
-                    "question":        question,
-                },
-            ))
+            chunks.append(
+                Document(
+                    page_content=page_content,
+                    metadata={
+                        "source": doc.metadata["source"],
+                        "question_number": int(number),
+                        "question": question,
+                    },
+                )
+            )
 
     print(f"Split {len(documents)} document(s) into {len(chunks)} chunk(s).")
 
     # Quick sanity-check printout
     if chunks:
         sample = chunks[0]
-        print("\n── Sample chunk ──────────────────────────────")
+        print("\n--- Sample chunk ------------------------------")
         print(sample.page_content)
         print("Metadata:", sample.metadata)
-        print("──────────────────────────────────────────────\n")
+        print("----------------------------------------------\n")
 
     return chunks
 
 
-# ── Save to Chroma ─────────────────────────────────────────────────────────────
-
+# -------------------- Save to Chroma --------------------
 def save_to_chroma(chunks: list[Document]) -> None:
     """
     Persist chunks to a local Chroma vector store.
@@ -118,17 +124,22 @@ def save_to_chroma(chunks: list[Document]) -> None:
         shutil.rmtree(CHROMA_PATH)
         print(f"Cleared existing Chroma DB at '{CHROMA_PATH}'.")
 
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "GOOGLE_API_KEY is not set. Add it to RAG/.env or set it in your environment."
+        )
+
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/gemini-embedding-001",
-        google_api_key=os.environ["GOOGLE_API_KEY"],
+        google_api_key=api_key,
     )
 
     db = Chroma.from_documents(
-        documents        = chunks,
-        embedding        = embeddings,
-        persist_directory= CHROMA_PATH,
+        documents=chunks,
+        embedding=embeddings,
+        persist_directory=CHROMA_PATH,
     )
-    db.persist()
 
     print(f"Saved {len(chunks)} chunk(s) to Chroma at '{CHROMA_PATH}'.")
 

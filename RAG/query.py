@@ -1,14 +1,24 @@
 import random
 import re
 import os
+import warnings
 from dotenv import load_dotenv
-from langchain_community.vectorstores import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
+try:
+    from langchain_chroma import Chroma
+except ImportError:
+    from langchain_community.vectorstores import Chroma
+    warnings.filterwarnings(
+        "ignore",
+        message=r"The class `Chroma` was deprecated in LangChain 0\.2\.9.*",
+    )
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv()
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
-CHROMA_PATH = "chroma"
+CHROMA_PATH = os.path.join(BASE_DIR, "chroma")
 
 EVAL_TEMPLATE = """
 You are evaluating a student's answer to a machine learning question.
@@ -44,21 +54,27 @@ def parse_chunk(chunk_text):
 
 def main():
     # Load DB and model
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "GOOGLE_API_KEY is not set. Add it to RAG/.env or set it in your environment."
+        )
+
     embedding_function = GoogleGenerativeAIEmbeddings(
         model="models/gemini-embedding-001",
-        google_api_key=os.environ["GOOGLE_API_KEY"],
+        google_api_key=api_key,
     )
     db = Chroma(persist_directory=CHROMA_PATH, embedding_function=embedding_function)
     model = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
-        google_api_key=os.environ["GOOGLE_API_KEY"],
+        google_api_key=api_key,
     )
     eval_prompt = ChatPromptTemplate.from_template(EVAL_TEMPLATE)
 
     all_chunks = db.get()
     total_chunks = len(all_chunks["documents"])
     if total_chunks == 0:
-        print("No chunks found in DB. Run create_database.py first.")
+        print("No chunks found in DB. Run make_db.py first.")
         return
 
     print("\n-----ML Quiz-----")
